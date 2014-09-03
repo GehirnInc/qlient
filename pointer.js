@@ -22,7 +22,7 @@ function toIndex (array, token) {
     return array.length;
   }
 
-  if (!(/(0|[1-9][0-9]*)/.test(token))) {
+  if (!(/^(0|[1-9][0-9]*)$/.test(token))) {
     throw new InvalidSyntaxError('only digits or "-" are allowed for an array as a key');
   }
 

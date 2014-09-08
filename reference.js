@@ -95,13 +95,20 @@ function resolve (scope) {
   var invIndex = makeInvIndex(scope),
       _path = path.bind(null, scope);
 
+  var tracks = {};
+
   function resolve (dst) {
     if (!invIndex.hasOwnProperty(dst)) { return; }
+    if (tracks.hasOwnProperty(dst)) {
+      throw new Error('bad reference: no entity');
+    }
+    tracks[dst] = true;
     var srcList = invIndex[dst];
     srcList.forEach(function (src) {
       _path(src).set(_path(dst).get());
       resolve(src);
-    });    
+    });
+    delete tracks[dst];
   }
 
   Object.keys(invIndex).forEach(function (key) {
@@ -136,4 +143,25 @@ if (!module.parent) {
     assert.ok(v['/foo'] === v['/bar'].foo);
     assert.ok(v['/bar'] === v['/foo'].bar);
   });
+
+  check(reference.resolve({
+    '/foo': { $ref: '/bar' },
+    '/bar': { foo: { $ref: '/foo' } },
+    '/baz': { $ref: '/bar#/foo' }
+  }), function (v) {
+
+  });
+  
+  assert.throws(function () {
+    reference.resolve({
+      '/a': { $ref: '/b' },
+      '/b': { $ref: '/a' }
+    });
+  }, Error);
+  
+  assert.throws(function () {
+    reference.resolve({
+      '/': { $ref: '#' }
+    });
+  }, Error);
 }

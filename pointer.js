@@ -17,6 +17,24 @@ function unescapeToken (token) {
   return token.split('~1').join('/').split('~0').join('~');
 }
 
+function escapeToken (token) {
+  return token.split('~').join('~0').split('/').join('~1');
+}
+
+function encodeTokens (tokens) {
+  return tokens.map(escapeToken).map(function (token) {
+    return '/' + token;
+  }).join('');
+}
+
+function decodePath (path) {
+  var tokens = path.split('/').map(unescapeToken);
+  if (tokens[0].length !== 0) {
+    throw new InvalidSyntaxError('path must start with "/" or be empty');
+  }
+  return tokens;
+}
+
 function toIndex (array, token) {
   if (token === '-') {
     return array.length;
@@ -60,7 +78,7 @@ function travasal (obj, tokens, isGet, value) {
     }
   } else if (typeof obj === 'object') {
     if (isGet && !(obj.hasOwnProperty(token))) {
-      throw new BadReferenceError('the pointer references a nonexistent value');      
+      throw new BadReferenceError('the pointer references a nonexistent value');
     }
     if (isLast) {
       if (isGet) {
@@ -76,12 +94,13 @@ function travasal (obj, tokens, isGet, value) {
   }
 }
 
-var pointer = module.exports = function (obj, path) {
-  var tokens, wrapper, f;
+function path (obj, path) {
+  var wrapper, f, tokens;
 
-  tokens = path.split('/').map(unescapeToken);
-  if (tokens[0].length !== 0) {
-    throw new InvalidSyntaxError('path must start with "/" or be empty');
+  if (Array.isArray(path)) {
+    tokens = path;
+  } else {
+    tokens = decodePath(path);
   }
 
   wrapper = { '': obj };
@@ -89,43 +108,49 @@ var pointer = module.exports = function (obj, path) {
 
   return {
     get: function () {
-      return f(this);
+      return f(true);
     },
     set: function (value) {
       f(false, value);
       return wrapper[''];
     }
   };
+}
+
+var pointer = module.exports = {
+  path: path,
+  encode: encodeTokens,
+  decode: decodePath
 };
 
 if (!module.parent) {
   !function getter () {
     var obj = { a: 1, b: { c: 2 }, l: [0, 1, 2] };
     
-    assert.deepEqual(pointer(obj, '').get(), obj);
+    assert.deepEqual(pointer.path(obj, '').get(), obj);
 
-    assert.deepEqual(pointer(obj, '/a').get(), 1);
+    assert.deepEqual(pointer.path(obj, '/a').get(), 1);
 
-    assert.deepEqual(pointer(obj, '/b').get(), { c: 2 });
+    assert.deepEqual(pointer.path(obj, '/b').get(), { c: 2 });
 
-    assert.deepEqual(pointer(obj, '/b/c').get(), 2);
+    assert.deepEqual(pointer.path(obj, '/b/c').get(), 2);
 
-    assert.deepEqual(pointer(obj, '/l').get(), [0, 1, 2]);
+    assert.deepEqual(pointer.path(obj, '/l').get(), [0, 1, 2]);
 
-    assert.deepEqual(pointer(obj, '/l/0').get(), 0);
+    assert.deepEqual(pointer.path(obj, '/l/0').get(), 0);
 
-    assert.deepEqual(pointer(obj, '/l/2').get(), 2);
+    assert.deepEqual(pointer.path(obj, '/l/2').get(), 2);
 
     assert.throws(function () {
-      pointer(obj, '/l/a').get();
+      pointer.path(obj, '/l/a').get();
     }, InvalidSyntaxError);
 
     assert.throws(function () {
-      pointer(obj, '/l/-').get();
+      pointer.path(obj, '/l/-').get();
     }, InvalidSyntaxError);
 
     assert.throws(function () {
-      pointer(obj, '/c').get();
+      pointer.path(obj, '/c').get();
     }, BadReferenceError);
   }();
 
@@ -133,41 +158,41 @@ if (!module.parent) {
     var obj;
 
     obj = { a: 1, b: { c: 2 } };
-    assert.deepEqual(pointer(obj, '').set(1), 1);
+    assert.deepEqual(pointer.path(obj, '').set(1), 1);
 
     obj = { a: 1, b: { c: 2 } };  
-    assert.deepEqual(pointer(obj, '/a').set(3), { a: 3, b: { c: 2 } });
+    assert.deepEqual(pointer.path(obj, '/a').set(3), { a: 3, b: { c: 2 } });
 
     obj = { a: 1, b: { c: 2 } };
-    assert.deepEqual(pointer(obj, '/b').set(3), { a: 1, b: 3 });
+    assert.deepEqual(pointer.path(obj, '/b').set(3), { a: 1, b: 3 });
 
     obj = { a: 1, b: { c: 2 } };
-    assert.deepEqual(pointer(obj, '/b/c').set(3), { a: 1, b: { c: 3 } });
+    assert.deepEqual(pointer.path(obj, '/b/c').set(3), { a: 1, b: { c: 3 } });
 
     obj = { a: 1, b: { c: 2 } };
-    assert.deepEqual(pointer(obj, '/b/d').set(3), { a: 1, b: { c: 2, d: 3 } });
+    assert.deepEqual(pointer.path(obj, '/b/d').set(3), { a: 1, b: { c: 2, d: 3 } });
 
     obj = { a: 1, b: { c: 2 }, l: [0, 1, 2] };
-    assert.deepEqual(pointer(obj, '/l/0').set(3), { a: 1, b: { c: 2 }, l: [3, 1, 2] });
+    assert.deepEqual(pointer.path(obj, '/l/0').set(3), { a: 1, b: { c: 2 }, l: [3, 1, 2] });
 
     obj = { a: 1, b: { c: 2 }, l: [0, 1, 2] };
-    assert.deepEqual(pointer(obj, '/l/-').set(3), { a: 1, b: { c: 2 }, l: [0, 1, 2, 3] });
+    assert.deepEqual(pointer.path(obj, '/l/-').set(3), { a: 1, b: { c: 2 }, l: [0, 1, 2, 3] });
 
     obj = { a: 1, b: { c: 2 } };
     assert.doesNotThrow(function () {
-      assert.deepEqual(pointer(obj, '/d').set(1), { a: 1, b: { c: 2 }, d: 1 });
+      assert.deepEqual(pointer.path(obj, '/d').set(1), { a: 1, b: { c: 2 }, d: 1 });
     });
 
     obj = { a: 1, b: { c: 2 } };
     assert.throws(function () {
-      pointer(obj, '/d/e').set(1);
+      pointer.path(obj, '/d/e').set(1);
     }, BadReferenceError);
   }();
 
   !function syntax () {
     var obj = { a: 1, b: { c: 2 } };
     assert.throws(function () {
-      pointer(obj, 'a');
+      pointer.path(obj, 'a');
     }, InvalidSyntaxError);
   }();
 }

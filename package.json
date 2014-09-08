@@ -23,6 +23,6 @@
   "dependencies": {
     "fast-json-patch": "^0.3.10",
     "xmldom": "^0.1.19",
-    "tv4": "^1.1.0"
+    "uri-js": "^1.4.2"
   }
 }

@@ -1,15 +1,15 @@
 var URI = require('uri-js'),
     pointer = require('./pointer');
 
-function normalizeRef (uri) {
+function normalizeRefUri (uri) {
   var uriObj = URI.parse(uri);
   uriObj.fragment = uriObj.fragment || undefined;
   return URI.serialize(uriObj);
 }
 
-function normalizeKeys (scope) {
+function normalizeScopeKeys (scope) {
   return Object.keys(scope).reduce(function (obj, key) {
-    obj[normalizeRef(key)] = scope[key];
+    obj[normalizeRefUri(key)] = scope[key];
     return obj;
   }, {});
 }
@@ -49,8 +49,8 @@ function listPointers (baseUri, pTokens, obj) {
       var srcObj = URI.parse(baseUri);
       srcObj.fragment = pointer.encode(pTokens);
       return [{
-        src: normalizeRef(URI.serialize(srcObj)),
-        dst: normalizeRef(URI.resolve(baseUri, obj.$ref))
+        src: normalizeRefUri(URI.serialize(srcObj)),
+        dst: normalizeRefUri(URI.resolve(baseUri, obj.$ref))
       }];
     } else {
       // normal
@@ -89,7 +89,7 @@ function path (scope, uri) {
 }
 
 function resolve (scope) {
-  scope = normalizeKeys(scope);
+  scope = normalizeScopeKeys(scope);
   
   // make ref table
   var invIndex = makeInvIndex(scope),
@@ -120,7 +120,9 @@ function resolve (scope) {
 
 var reference = module.exports = {
   path: path,
-  resolve: resolve
+  resolve: resolve,
+  normalizeRefUri: normalizeRefUri,
+  normalizeScopeKeys: normalizeScopeKeys
 };
 
 if (!module.parent) {
@@ -129,7 +131,7 @@ if (!module.parent) {
   function check (obj, cb) {
     cb(obj);
   }
-
+  
   check(reference.resolve({
     '/': { self: { $ref: '#' } }
   }), function (v) {

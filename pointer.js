@@ -10,7 +10,7 @@ function escapeToken (token) {
 }
 
 function encodeTokens (tokens) {
-  return tokens.map(escapeToken).map(function (token) {
+  return tokens.map(String).map(escapeToken).map(function (token) {
     return '/' + token;
   }).join('');
 }
@@ -62,7 +62,7 @@ function travasal (obj, tokens, isGet, value) {
         return obj[index] = value;
       }
     } else {
-      return travasal(obj[index], tokens.slice(1), isGet, value);
+      return travasal(obj[index], tokens, isGet, value);
     }
   } else if (typeof obj === 'object') {
     if (isGet && !(obj.hasOwnProperty(token))) {

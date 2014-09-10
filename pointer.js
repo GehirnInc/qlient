@@ -1,18 +1,6 @@
 var util = require('util'),
     assert = require('assert');
 
-function InvalidSyntaxError (message) {
-  Error.call(this);
-  this.message = 'Invalid Syntax: ' + message;
-}
-util.inherits(InvalidSyntaxError, Error);
-
-function BadReferenceError (message) {
-  Error.call(this);
-  this.message = 'Bad Reference: ' + message;
-}
-util.inherits(BadReferenceError, Error);
-
 function unescapeToken (token) {
   return token.split('~1').join('/').split('~0').join('~');
 }
@@ -30,7 +18,7 @@ function encodeTokens (tokens) {
 function decodePath (path) {
   var tokens = path.split('/').map(unescapeToken);
   if (tokens[0].length !== 0) {
-    throw new InvalidSyntaxError('path must start with "/" or be empty');
+    throw new SyntaxError('path must start with "/" or be empty');
   }
   return tokens;
 }
@@ -41,12 +29,12 @@ function toIndex (array, token) {
   }
 
   if (!(/^(0|[1-9][0-9]*)$/.test(token))) {
-    throw new InvalidSyntaxError('only digits or "-" are allowed for an array as a key');
+    throw new SyntaxError('only digits or "-" are allowed for an array as a key');
   }
 
   var index = ~~token;
   if (!(0 <= index && index < array.length)) {
-    throw new BadReferenceError('index is out of range');
+    throw new ReferenceError('index is out of range');
   }
 
   return index;
@@ -62,7 +50,7 @@ function travasal (obj, tokens, isGet, value) {
     var index = toIndex(obj, token);
     if (index === obj.length) {
       if (isGet) {
-        throw new InvalidSyntaxError('key "-" is invalid for gettter of array');
+        throw new SyntaxError('key "-" is invalid for gettter of array');
       } else if (isLast) {
         return obj.push(value);
       }
@@ -78,7 +66,7 @@ function travasal (obj, tokens, isGet, value) {
     }
   } else if (typeof obj === 'object') {
     if (isGet && !(obj.hasOwnProperty(token))) {
-      throw new BadReferenceError('the pointer references a nonexistent value');
+      throw new ReferenceError('the pointer references a nonexistent value');
     }
     if (isLast) {
       if (isGet) {
@@ -90,7 +78,7 @@ function travasal (obj, tokens, isGet, value) {
       return travasal(obj[token], tokens, isGet, value);
     }
   } else {
-    throw new BadReferenceError('the pointer references a nonexistent value');
+    throw new ReferenceError('the pointer references a nonexistent value');
   }
 }
 
@@ -143,15 +131,15 @@ if (!module.parent) {
 
     assert.throws(function () {
       pointer.path(obj, '/l/a').get();
-    }, InvalidSyntaxError);
+    }, SyntaxError);
 
     assert.throws(function () {
       pointer.path(obj, '/l/-').get();
-    }, InvalidSyntaxError);
+    }, SyntaxError);
 
     assert.throws(function () {
       pointer.path(obj, '/c').get();
-    }, BadReferenceError);
+    }, ReferenceError);
   }();
 
   !function setter () {
@@ -186,13 +174,13 @@ if (!module.parent) {
     obj = { a: 1, b: { c: 2 } };
     assert.throws(function () {
       pointer.path(obj, '/d/e').set(1);
-    }, BadReferenceError);
+    }, ReferenceError);
   }();
 
   !function syntax () {
     var obj = { a: 1, b: { c: 2 } };
     assert.throws(function () {
       pointer.path(obj, 'a');
-    }, InvalidSyntaxError);
+    }, SyntaxError);
   }();
 }

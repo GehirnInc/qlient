@@ -12,7 +12,7 @@ function escapeToken (token) {
 function encodeTokens (tokens) {
   return tokens.map(String).map(escapeToken).map(function (token) {
     return '/' + token;
-  }).join('');
+  }).join('/');
 }
 
 function decodePath (path) {
@@ -40,45 +40,85 @@ function toIndex (array, token) {
   return index;
 }
 
-function travasal (obj, tokens, isGet, value) {
+var ops = {
+  array: {
+    set: function (arr, idx, value) {
+      if (idx === arr.length) {
+        return arr.push(value);
+      } else {
+        return arr[idx] = value;
+      }
+    },
+    get: function (arr, idx, value) {
+      if (this.chk.apply(this, arguments)) {
+        return arr[idx];
+      } else {
+        throw new ReferenceError('the pointer references a nonexistent value');
+      }
+    },
+    add: function (arr, idx, value) {
+      if (idx < 0 || arr.length < idx) {
+        throw new RangeError('index `' + idx + '` is out of range');
+      }
+      arr.splice(idx, 0, value);
+      return value;
+    },
+    chk: function (arr, idx, value) {
+      return (0 <= idx && idx < arr.length);
+    },
+    rmv: function (arr, idx, value) {
+      arr.splice(idx, 1);
+      return value;
+    }
+  },
+  object: {
+    set: function (obj, key, value) {
+      return obj[key] = value;
+    },
+    get: function (obj, key, value) {
+      return ops.array.get.apply(this, arguments);
+    },
+    add: function (obj, key, value) {
+      return ops.object.set.apply(this, arguments);
+    },
+    chk: function (obj, key, value) {
+      return obj.hasOwnProperty(key);
+    },
+    rmv: function (obj, key, value) {
+      return delete obj[key];
+    }
+  }
+};
+
+function travasal (obj, tokens, op, value) {
   assert(tokens.length >= 1);
 
   var isLast = (tokens.length === 1);
   
-  var token = tokens.shift();
+  var token = tokens[0],
+      opset, key;
   if (Array.isArray(obj)) {
-    var index = toIndex(obj, token);
-    if (index === obj.length) {
-      if (isGet) {
-        throw new SyntaxError('key "-" is invalid for gettter of array');
-      } else if (isLast) {
-        return obj.push(value);
-      }
-    }
-    if (isLast) {
-      if (isGet) {
-        return obj[index];
-      } else {
-        return obj[index] = value;
-      }
-    } else {
-      return travasal(obj[index], tokens, isGet, value);
-    }
-  } else if (typeof obj === 'object') {
-    if (isGet && !(obj.hasOwnProperty(token))) {
-      throw new ReferenceError('the pointer references a nonexistent value');
-    }
-    if (isLast) {
-      if (isGet) {
-        return obj[token];
-      } else {
-        return obj[token] = value;
-      }
-    } else {
-      return travasal(obj[token], tokens, isGet, value);
-    }
+    key = toIndex(obj, token);
+    opset = ops.array;
+  } else if (obj instanceof Object) {
+    key = token;
+    opset = ops.object;
   } else {
     throw new ReferenceError('the pointer references a nonexistent value');
+  }
+
+  if (isLast) {
+    if (opset.hasOwnProperty(op)) {
+      return opset[op](obj, key, value);
+    } else {
+      throw new TypeError('invalid operation `' + op + '`');
+    }
+  } else {
+    if (obj.hasOwnProperty(token)) {
+      return travasal(obj[token], tokens.slice(1), op, value);      
+    } else {
+      throw new ReferenceError('the pointer references a nonexistent value');
+    }
   }
 }
 
@@ -96,10 +136,21 @@ function path (obj, path) {
 
   return {
     get: function () {
-      return f(true);
+      return f('get');
     },
     set: function (value) {
-      f(false, value);
+      f('set', value);
+      return wrapper[''];
+    },
+    add: function (value) {
+      f('add', value);
+      return wrapper[''];
+    },
+    chk: function () {
+      return f('chk');
+    },
+    rmv: function () {
+      f('rmv');
       return wrapper[''];
     }
   };
@@ -132,10 +183,10 @@ if (!module.parent) {
     assert.throws(function () {
       pointer.path(obj, '/l/a').get();
     }, SyntaxError);
-
+    
     assert.throws(function () {
       pointer.path(obj, '/l/-').get();
-    }, SyntaxError);
+    }, ReferenceError);
 
     assert.throws(function () {
       pointer.path(obj, '/c').get();

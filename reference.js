@@ -14,15 +14,15 @@ function normalizeScopeKeys (scope) {
   }, {});
 }
 
-function initInvIndex (scope) {
+function initInverseIndex (scope) {
   return Object.keys(scope).reduce(function (obj, key) {
     obj[key] = [];
     return obj;
   }, {});  
 }
 
-function makeInvIndex (scope) {
-  var refTable = initInvIndex(scope);
+function makeInverseIndex (scope) {
+  var refTable = initInverseIndex(scope);
   return Object.keys(scope).map(function (key) {
     return listPointers(key, [], scope[key]);
   }).reduce(concat).reduce(function (idx, ref) {
@@ -92,7 +92,7 @@ function resolve (scope) {
   scope = normalizeScopeKeys(scope);
   
   // make ref table
-  var invIndex = makeInvIndex(scope),
+  var invIndex = makeInverseIndex(scope),
       _path = path.bind(null, scope);
 
   var tracks = {};
@@ -122,7 +122,8 @@ var reference = module.exports = {
   path: path,
   resolve: resolve,
   normalizeRefUri: normalizeRefUri,
-  normalizeScopeKeys: normalizeScopeKeys
+  normalizeScopeKeys: normalizeScopeKeys,
+  makeInverseIndex: makeInverseIndex
 };
 
 if (!module.parent) {

@@ -186,34 +186,3 @@ Qlient.prototype.requestRESTfully = function (method, res, id,
       return JSON.parse(xhr.response);
     });
 };
-
-if (!module.parent) {
-  var qlient = new Qlient('http://yuno:6544/edj/v1/');
-
-  var Topic = qlient.res('topic');
-
-  //var topic = new Topic('354e16a6-4759-46a5-997e-253cd9a35d9f');
-
-  /*
-  topic.$resolve().then(function () {
-    console.log(topic);
-  }).catch(function (err) {
-    console.log(err);
-  });
-   */
-
-  var topic = new Topic();
-
-  topic.$transaction(function (topic) {
-    console.log('transaction');
-    topic.description = 'foobar';
-  }).then(function () {
-    console.log(topic);
-  }).catch(function (err) {
-    console.log(err);
-  });
-
-  Topic.all().then(function (list) {
-    console.log(list);
-  });
-}

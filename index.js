@@ -152,6 +152,10 @@ Qlient.prototype.res = function (name) {
   return this.def(name, AbstractResource.T(this, name));
 };
 
+Qlient.prototype.task = function (name) {
+  return this.def(name, AbstractTask.T(this, name));
+};
+
 Qlient.prototype.request = function (method, pathname, headers, body) {
   headers = headers || {};
   var endPoint = url.resolve(this.baseUrl, pathname);

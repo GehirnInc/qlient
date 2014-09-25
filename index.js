@@ -170,7 +170,8 @@ Qlient.prototype.request = function (method, pathname, headers, body) {
   });
 };
 
-Qlient.prototype.requestRESTfully = function (method, res, id, queries, headers, body) {
+Qlient.prototype.requestRESTfully = function (method, res, id,
+                                              queries, headers, body) {
   res = inflect.pluralize(res);
   id = id || '';
   queries = queries || {};

@@ -186,3 +186,5 @@ Qlient.prototype.requestRESTfully = function (method, res, id,
       return JSON.parse(xhr.response);
     });
 };
+
+module.exports = Qlient;

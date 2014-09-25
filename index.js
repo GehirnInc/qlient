@@ -34,6 +34,8 @@ function AbstractResource (qlient, id) {
   this.$_isSuspective = true;
   this.$_value = {};
   this.$_etag = null;
+
+  return this;
 }
 
 AbstractResource.all = function () {

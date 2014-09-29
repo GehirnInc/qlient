@@ -41,7 +41,7 @@ var Qlass = BaseQlass.$extend({
     var Class, instance, ret;
     Class = this;
     instance = Object.create(Class.$proto);
-    ret = instance.ctor();
+    ret = instance.ctor.apply(instance, arguments);
 
     return (ret === undefined) ? instance : ret;
   },
@@ -98,6 +98,9 @@ if (!module.parent) {
       // instance member
       piyo: function () {
         return 'piyo';
+      },
+      hogehoge: function () {
+        return this.$super.huga();
       }
     });
 
@@ -114,5 +117,6 @@ if (!module.parent) {
 
     assert.equal(i.hoge(), 'hoge');
     assert.equal(i.piyo(), 'piyo');
+    assert.equal(i.hogehoge(), 'huga');
   })();
 }

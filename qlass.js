@@ -1,6 +1,6 @@
 var Qlass = module.exports = {};
 
-Qlass.$def = function (statics, dynamics) {
+Qlass.$extend = function (statics, dynamics) {
   statics.$proto = Object.create(this.$proto);
 
   Object.keys(dynamics).forEach(function (key) {
@@ -22,7 +22,7 @@ Qlass.$def = function (statics, dynamics) {
 
 Qlass.$proto = {};
 
-Qlass = Qlass.$def({
+Qlass = Qlass.$extend({
   new: function (/* args */) {
     var instance = Object.create(this.$proto),
         ret = instance.ctor();
@@ -38,7 +38,7 @@ module.exports = Qlass;
 if (!module.parent) {
   var assert = require('assert');
 
-  var Klass = Qlass.$def({
+  var Klass = Qlass.$extend({
     // class member
     foo: function () {
       return 'foo';
@@ -56,7 +56,7 @@ if (!module.parent) {
     }
   });
 
-  var Child = Klass.$def({
+  var Child = Klass.$extend({
     // class member
     baz: function () {
       return 'baz';

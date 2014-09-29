@@ -52,6 +52,16 @@ var Qlass = BaseQlass.$extend({
       }
     }
     return false;
+  },
+  isClassOf: function (instance) {
+    for (var proto = Object.getPrototypeOf(instance);
+         proto !== null;
+         proto = Object.getPrototypeOf(proto)) {
+      if (this.$proto === proto) {
+        return true;
+      }
+    }
+    return false;
   }
 }, {
   ctor: function () { /* NOOP */ },

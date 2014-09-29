@@ -8,30 +8,31 @@ var http = require('http'),
 
 function NOOP () { /* NOOP */ }
 
-if (!global.hasOwnProperty('Promise')) {
-  global.Promise = require('es6-promise').Promise;
+function make$lessObj ($ful) {
+  return Object.keys($ful).filter(function (key) {
+    return key.indexOf('$') !== 0;
+  }).reduce(function ($less, key) {
+    $less[key] = $ful[key];
+    return $less;
+  }, {});
 }
 
-if (!global.hasOwnProperty('XMLHttpRequest')) {
-  global.XMLHttpRequest = require('xhr2');
-}
-
-function AbstractResource (qlient, id) {
+function AbstractResource (qlient, id, idField) {
   if (typeof id === 'string') {
     var instances = this.constructor.instances;
 
     if (instances.hasOwnProperty(id)) {
       return instances[id];
     } else {
+      this.$_id = id;
       instances[id] = this;
     }
+  } else {
+    this.$_id = null;
   }
 
-  this.$_qlient = qlient;
-
-  this.$_name = null;
-  this.$_id = null;
-  this.$_isSuspective = true;
+  //this.$_isSuspective = true;
+  this.$_idField = idField || 'id';
   this.$_value = {};
   this.$_etag = null;
 
@@ -39,7 +40,8 @@ function AbstractResource (qlient, id) {
 }
 
 AbstractResource.all = function () {
-  return qlient.requestRESTfully('GET', this.$name).then(function (list) {
+  var instance = new this();
+  return instance.$request('GET').then(function (list) {
     return list.map(function (value) {
       var res = new this(value.id);
       res.$sync(value, false);
@@ -48,96 +50,128 @@ AbstractResource.all = function () {
   }.bind(this));
 };
 
-AbstractResource.T = function (qlient, name) {
+AbstractResource.T = function (qlient, name, idField) {
   function Resource (id) {
-    AbstractResource.call(this, qlient, id);
-
-    this.$_name = name;
-    this.$_id = id || null;
+    return AbstractResource.call(this, qlient, id, idField);
   }
   util.inherits(Resource, AbstractResource);
 
   Resource.instances = {};
-  Resource.all = AbstractResource.all;
   Resource.$name = name;
+  Resource.$qlient = qlient;
+
+  Resource.all = AbstractResource.all;
 
   return Resource;
 };
 
+AbstractResource.prototype.$getPath = function () {
+  var res = inflect.pluralize(this.constructor.$name),
+      id = this.$_id || '';
+
+  return [res, id];
+};
+
+AbstractResource.prototype.$makeUrl = function (query) {
+  query = query || {};
+  return url.format({
+    pathname: path.join.apply(path, this.$getPath()),
+    query: query
+  });
+};
+
+AbstractResource.prototype.$request = function (method, query, headers, body) {
+  var urlPath = this.$makeUrl(query);
+  return this.constructor.$qlient.request(method, urlPath, headers, JSON.stringify(body))
+    .then(function (xhr) {
+      //this.$_etag = xhr.getResponseHeader('ETag');
+      return JSON.parse(xhr.response);
+    }.bind(this));
+};
+
 AbstractResource.prototype.$sync = function (newValue, canDelete) {
   // TODO: check if value is an object
-  var diff = patch.diff(this.$_value, newValue).filter(function (patch) {
+  var current = make$lessObj(this);
+  var diff = patch.diff(current, newValue).filter(function (patch) {
     return canDelete || patch.op !== 'remove';
   });
   patch.patch(this, diff);
   this.$_value = newValue;
   if (typeof this.$_id !== 'string') {
     this.constructor.instances[this.id] = this;
-    this.$_id = this.id;
+    this.$_id = this[this.$_idField];
   }
+  return this;
 };
 
 AbstractResource.prototype.$resolve = function () {
-  return this.$_qlient.requestRESTfully('GET', this.$_name, this.$_id)
-    .then(function (newValue) {
-      return this.$sync(newValue, true);
-    }.bind(this));
+  return this.$request('GET').then(function (newValue) {
+    return this.$sync(newValue, true);
+  }.bind(this));
 };
 
-AbstractResource.prototype.$transaction = function (cb, queries) {
+AbstractResource.prototype.$transaction = function (cb, query, isPatch) {
   cb = cb || NOOP;
+  isPatch = !!isPatch;
   return Promise.resolve(cb(this)).then(function () {
-    var newValue = Object.keys(this).filter(function (key) {
-      return key.indexOf('$') !== 0;
-    }).reduce(function (obj, key) {
-      obj[key] = this[key];
-      return obj;
-    }.bind(this), {});
+    var newValue = make$lessObj(this);
 
-    (function () {
+    return (function () {
       if (this.$_id === null) {
-        return this.$_qlient.requestRESTfully(
-          'POST', this.$_name, null, queries, {}, newValue);
+        return this.$request('POST', query, {}, newValue);
       } else {
-        return this.$_qlient.requestRESTfully(
-          'PUT', this.$_name, this.$_id, queries, {}, newValue);
+        if (isPatch) {
+          return this.$request('PATCH', query, {
+            'Content-Type': 'application/patch+json',
+            'If-Match': this.$_etag
+          }, patch.diff(this.$_value, newValue));
+        } else {
+          return this.$request('PUT', query, {}, newValue);
+        }
       }
     }).call(this).then(function (newValue) {
-      return this.$sync(newValue);
-    });
+      return this.$sync(newValue, true);
+    }.bind(this));
   }.bind(this));
 };
 
 function AbstractTask () {
+  return AbstractResource.apply(this, arguments);
 }
 util.inherits(AbstractTask, AbstractResource);
 
-AbstractTask.T = function (qlient, name) {
-  function Task (id) {
-    AbstractTask.call(this, qlient, id);
+AbstractTask.queue = function (procedure, args, isSync) {
+  isSync = isSync || false;
 
-    this.$_name = name;
-    this.$_id = id || null;
+  var task = new this();
+  return task.$transaction(function () {
+    task.procedure = procedure;
+    task.arguments = args;
+  }, { is_sync: isSync });
+};
+
+AbstractTask.T = function (qlient, name, idField) {
+  function Task (id) {
+    return AbstractTask.call(this, qlient, id, idField);
   }
   util.inherits(Task, AbstractTask);
 
   Task.instances = {};
-  Task.all = AbstractResource.call;
   Task.$name = name;
-  Task.queue = function (procedure, isSync) {
-    isSync = isSync || false;
-    var task = new Task();
-    return task.$transaction(function () {
-      task.procedure = procedure;
-    }, { isSync: isSync });
-  };
+  Task.$qlient = qlient;
+  Task.all = AbstractResource.all;
+  Task.queue = AbstractTask.queue;
 
   return Task;
 };
 
-function Qlient (baseUrl) {
+function Qlient (baseUrl, wrap) {
   this.models = {};
   this.baseUrl = baseUrl;
+  this.auth = null;
+
+  // Angular Support
+  this.wrap = wrap || function (a) { return a; };
 }
 
 Qlient.prototype.def = function (name, model) {
@@ -148,19 +182,23 @@ Qlient.prototype.model = function (name) {
   return this.models[name];
 };
 
-Qlient.prototype.res = function (name) {
-  return this.def(name, AbstractResource.T(this, name));
+Qlient.prototype.res = function (name, idField) {
+  return this.def(name, AbstractResource.T(this, name, idField));
 };
 
-Qlient.prototype.task = function (name) {
-  return this.def(name, AbstractTask.T(this, name));
+Qlient.prototype.task = function (name, idField) {
+  return this.def(name, AbstractTask.T(this, name, idField));
+};
+
+Qlient.prototype.setBasicAuth = function (user, password) {
+  this.auth = 'Basic ' + new Buffer(user + ':' + password).toString('base64');
 };
 
 Qlient.prototype.request = function (method, pathname, headers, body) {
   headers = headers || {};
   var endPoint = url.resolve(this.baseUrl, pathname);
-  console.log(endPoint);
-  return new Promise(function (resolve, reject) {
+
+  return this.wrap(new Promise(function (resolve, reject) {
     var xhr = new XMLHttpRequest();
     xhr.onload = function () {
       resolve(xhr);
@@ -169,26 +207,15 @@ Qlient.prototype.request = function (method, pathname, headers, body) {
       reject(err);
     };
     xhr.open(method, endPoint);
+    if (this.auth !== null) {
+      //xhr.withCredentials = true;
+      xhr.setRequestHeader('Authorization', this.auth);
+    }
     Object.keys(headers).forEach(function (key) {
-      xhr.setRequstHeader(key, headers[key]);
+      xhr.setRequestHeader(key, headers[key]);
     });
     xhr.send(body);
-  });
-};
-
-Qlient.prototype.requestRESTfully = function (method, res, id,
-                                              queries, headers, body) {
-  res = inflect.pluralize(res);
-  id = id || '';
-  queries = queries || {};
-  var urlPath = url.stringify({
-    pathname: path.join([ res, id ]),
-    query: queries
-  });
-  return this.request(method, urlPath, headers, JSON.stringify(body))
-    .then(function (xhr) {
-      return JSON.parse(xhr.response);
-    });
+  }.bind(this)));
 };
 
 module.exports = Qlient;

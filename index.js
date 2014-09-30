@@ -18,7 +18,9 @@ function makeResourceMethod (name) {
     switch (typeof arg) {
     case 'undefined':
       // resource()
-      return Resource.all(parent);
+    case 'boolean':
+      // resource(true)
+      return Resource.all(parent, !!arg);
       break;
     case 'string':
       // resource('id')
@@ -149,7 +151,7 @@ var AbstractResource = Qlient.$extend({
     res._value[res.$class._idField] = id;
     return res;
   },
-  all: function (parent) {
+  all: function (parent, isDeep) {
     var Resource = this,
         res = Resource.new(parent);
 
@@ -164,11 +166,11 @@ var AbstractResource = Qlient.$extend({
           Resource._instances[instanceId]._destroy();
         }
       });
-      return list.map(function (value) {
+      return Promise.all(list.map(function (value) {
         var instance = Resource.new(parent);
         instance._sync(value, true);
-        return instance;
-      });
+        return isDeep ? instance.resolve() : instance;
+      }));
     }).then(function (list) {
       list.forEach(function (elem) { tmpArray.push(elem.value); });
       return list;

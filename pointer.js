@@ -12,7 +12,7 @@ function escapeToken (token) {
 function encodeTokens (tokens) {
   return tokens.map(String).map(escapeToken).map(function (token) {
     return '/' + token;
-  }).join('/');
+  }).join('');
 }
 
 function decodePath (path) {

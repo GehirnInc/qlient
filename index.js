@@ -11,24 +11,30 @@ var Qlass = require('./qlass');
 function NOOP () { /* NOOP */ }
 
 function makeResourceMethod (name) {
-  return function (arg) {
+  return function (arg0, arg1) {
     var Resource = this._models[name],
         parent = (AbstractResource.isClassOf(this) ? this : null);
     
-    switch (typeof arg) {
+    switch (typeof arg0) {
     case 'undefined':
       // resource()
     case 'boolean':
       // resource(true)
-      return Resource.all(parent, !!arg);
+      return Resource.all(parent, !!arg0);
       break;
     case 'string':
       // resource('id')
-      return Resource.byId(parent, arg);
+      if (arg1) {
+        var res = Resource.byId(parent, arg0);
+        res.resolve();
+        return res.value;
+      } else {
+        return Resource.byId(parent, arg0);
+      }
       break;
     case 'object':
       // resource({ key: value })
-      return Resource.new(parent, arg);
+      return Resource.new(parent, arg0);
       break;
     default:
       throw new TypeError('unknown type argument');
@@ -84,14 +90,13 @@ function parseDefinition (qlient, defs) {
 }
 
 var Qlient = Qlass.$extend({
-  def: function (modelDefs, endpoint, wrap) {
+  def: function (modelDefs, endpoint) {
     return Qlient.$extend({
       modelDefs: modelDefs,
-      endpoint: endpoint,
-      // Angular Support
-      wrap: wrap || function (a) { return a; }
+      endpoint: endpoint
     }, {});
-  }
+  },
+  Promise: Promise
 }, {
   ctor: function (user, password) {
     this.auth = null;    
@@ -103,6 +108,7 @@ var Qlient = Qlass.$extend({
     def.models.task = AbstractTask.def(this);
     def.methods.task = makeResourceMethod('task');
 
+    this.Task = def.models.task;
     this.$ = def.methods;
     this.$._models = def.models;
   },
@@ -110,7 +116,7 @@ var Qlient = Qlass.$extend({
     headers = headers || {};
     var endPoint = url.resolve(this.$class.endpoint, pathname);
 
-    return this.$class.wrap(new Promise(function (resolve, reject) {
+    return new Qlient.Promise(function (resolve, reject) {
       var xhr = new XMLHttpRequest();
       xhr.onload = function () {
         resolve(xhr);
@@ -127,7 +133,7 @@ var Qlient = Qlass.$extend({
         xhr.setRequestHeader(key, headers[key]);
       });
       xhr.send(body);
-    }.bind(this)));
+    }.bind(this));
   },
   setBasicAuth: function (user, password) {
     this.auth = 'Basic ' + new Buffer(user + ':' + password).toString('base64');
@@ -170,7 +176,8 @@ var AbstractResource = Qlient.$extend({
           Resource._instances[instanceId]._destroy();
         }
       });
-      return Promise.all(list.map(function (value) {
+
+      return Qlient.Promise.all(list.map(function (value) {
         var instance = Resource.new(parent);
         instance._sync(value, true);
         return isDeep ? instance.resolve() : instance;
@@ -217,6 +224,16 @@ var AbstractResource = Qlient.$extend({
     if (this._isSetId()) { throw new Error('id is set'); }
     return this._request('POST', {}, {}, this.value).then(this._sync.bind(this));
   },
+  assign: function (obj, key, path) {
+    var ref = pointer.path(this.value, path);
+    if (ref.chk()) {
+      obj[key] = ref.get();
+    }
+    return this.resolve().then(function (res) {
+      obj[key] = ref.get();
+      return res;
+    });
+  },
   _destroy: function () {
     return this._sync({});
   },
@@ -255,6 +272,15 @@ var AbstractResource = Qlient.$extend({
     });
 
     qlient = this.$class._qlient;
+
+    if (typeof body === 'object' && body !== null) {
+      body = Object.keys(body).reduce(function (obj, key) {
+        if (key.indexOf('$$') !== 0) {
+          obj[key] = body[key];
+        }
+        return obj;
+      }, {});
+    }
     
     return qlient.request(method, urlPath, headers, JSON.stringify(body))
       .then(function (xhr) {
@@ -293,7 +319,7 @@ var AbstractTask = AbstractResource.$extend({
     Task._cb = cb || NOOP;
     Task._timer = setInterval(function () {
       Task.all().then(function (tasks) {
-        return Promise.all(tasks.map(function (task) { return task.resolve(); }));
+        return Qlient.Promise.all(tasks.map(function (task) { return task.resolve(); }));
       }).then(function (tasks) {
         cb(tasks);
       });

@@ -117,7 +117,11 @@ function travasal (obj, tokens, op, value) {
     if (obj.hasOwnProperty(token)) {
       return travasal(obj[token], tokens.slice(1), op, value);      
     } else {
-      throw new ReferenceError('the pointer references a nonexistent value');
+      if (op === 'chk') {
+        return false;
+      } else {
+        throw new ReferenceError('the pointer references a nonexistent value');
+      }
     }
   }
 }

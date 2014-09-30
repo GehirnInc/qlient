@@ -146,8 +146,12 @@ var AbstractResource = Qlient.$extend({
     }, def.methods);
   },
   byId: function (parent, id) {
-    var Resource = this,
-        res = Resource.new(parent);
+    var Resource = this;
+    if (Resource._instances.hasOwnProperty(id)) {
+      return Resource._instances[id];
+    }
+    
+    var res = Resource.new(parent);
     res._value[res.$class._idField] = id;
     return res;
   },

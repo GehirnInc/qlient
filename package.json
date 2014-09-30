@@ -21,11 +21,7 @@
   },
   "homepage": "https://github.com/GehirnInc/qlient",
   "dependencies": {
-    "es6-promise": "^1.0.0",
-    "fast-json-patch": "^0.3.10",
     "i": "^0.3.2",
-    "uri-js": "^1.4.2",
-    "xhr2": "^0.1.0",
-    "xmldom": "^0.1.19"
+    "uri-js": "^1.4.2"
   }
 }

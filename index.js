@@ -96,7 +96,7 @@ var Qlient = Qlass.$extend({
       endpoint: endpoint
     }, {});
   },
-  Promise: Promise
+  Promise: global.Promise
 }, {
   ctor: function (user, password) {
     this.auth = null;    

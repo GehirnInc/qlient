@@ -140,6 +140,33 @@ var Qlient = Qlass.$extend({
   }
 });
 
+var ResourceList = Qlass.$extend({
+  
+}, {
+  _list: [],
+  ctor: function () {
+    Object.defineProperty(this.value, '$', {
+      enumerable: false
+    });
+    this.value.$ = this;
+  },
+  get value() {
+    return this._list;
+  },
+  sync: function (list) {
+    var activeIds = list.map(function (value) {
+      return value.$.id;
+    });
+
+    var i = 0;
+    for (i = this.value.length-1; i >= 0; --i) {
+      if (activeIds.indexOf(this.value[i].$.id) === -1) {
+        this.value[i].$.destroy();
+      }
+    }
+  }
+});
+
 var AbstractResource = Qlient.$extend({
   def: function (qlient, name, idField, childDefs) {
     var def = parseDefinition(qlient, childDefs);
@@ -192,7 +219,7 @@ var AbstractResource = Qlient.$extend({
 }, {
   ctor: function (parent, obj) {
     this._parent = parent || null;
-    this._value = Object.create({ $resource: this });
+    this._value = Object.create({ $: this });
 
     // TODO: dirty
     this._models = this.$class._models;

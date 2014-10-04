@@ -2,7 +2,7 @@
 
 var BaseQlass = {};
 
-BaseQlass.$extend = function (statics, dynamics) {
+BaseQlass.$extend = function (/* statics, dynamics */) {
   var Super = this,
       Class = Object.create(Super);
 
@@ -16,6 +16,14 @@ BaseQlass.$extend = function (statics, dynamics) {
     value: Super
   });
 
+  var ret = Class.$def.apply(Class, Array.prototype.slice.call(arguments));
+
+  return (ret === undefined) ? Class : ret;
+};
+
+BaseQlass.$def = function (statics, dynamics) {
+  var Class = this;
+
   Object.keys(statics).forEach(function (key) {
     Object.defineProperty(
       Class, key,
@@ -27,8 +35,6 @@ BaseQlass.$extend = function (statics, dynamics) {
       Class.$proto, key,
       Object.getOwnPropertyDescriptor(dynamics, key));
   });
-
-  return Class;
 };
 
 Object.defineProperties(BaseQlass, {

@@ -193,8 +193,17 @@ var AbstractModel = Qlass.$extend({
       // abstract
       var def = parseDefinition(children || {});
 
+      if (!isObject(statics)) {
+        statics = {};
+      }
       statics.children = def.models;
-      dynamics = def.methods;      
+
+      if (!isObject(dynamics)) {
+        dynamics = {};
+      }
+      Object.keys(def.methods).forEach(function (key) {
+        dynamics[key] = def.methods[key];
+      });
     }
 
     return AbstractModel.$super.$def.call(this, statics, dynamics);
@@ -253,6 +262,17 @@ var AbstractModel = Qlass.$extend({
         return model.resolveRef(childRef);
       }
     }
+  },
+  queue: function (childPath, procedure, args) {
+    var Task = this.$class.children.task;
+    if (!isObject(args)) {
+      args = {};
+    }
+    args.self = this.path + childPath;
+    return Task.new(this.root, {
+      procedure: procedure,
+      arguments: args
+    }).create();
   }
 });
 
@@ -380,7 +400,7 @@ var AbstractResource = AbstractModel.$extend({
     if (this._isIdSet()) { throw new Error('id is set'); }
     return wrapPromise(
       this.value,
-      this.parent.requestJSON('POST', ['/', this.pluralizedName].join(''), query, {}, this.value)
+      this.parent.requestJSON('POST', ['/', this.$class.pluralizedName].join(''), query, {}, this.value)
         .then(this.set.bind(this)));
   },
   assign: function (obj, key, path) {
@@ -439,9 +459,11 @@ var Qlient = AbstractModel.$extend({
   get path () {
     return this.$class.endpoint;
   },
-  request: function (method, pathname, headers, body) {
+  request: function (method, pathname, query, headers, body) {
     headers = headers || {};
-    var endPoint = this.path + pathname;
+    var urlObj = url.parse(this.path + pathname);
+    urlObj.query = query;
+    var endPoint = url.format(urlObj);
 
     return new Qlient.Promise(function (resolve, reject) {
       var xhr = new XMLHttpRequest();

@@ -10,39 +10,122 @@ var Qlass = require('./qlass');
 
 function NOOP () { /* NOOP */ }
 
+function isObject (obj) {
+  return (typeof obj === 'object' && obj !== null);
+}
+
+function parseRef (ref) {
+  var re, matches = null, model = null, id = null, rest = null;
+
+  re = new RegExp('^(/([^/]+))(.*)$');
+
+  matches = ref.match(re);
+  if (matches === null) {
+    throw new SyntaxError('invalid reference');
+  }
+
+  model = inflect.singularize(matches[2]);
+  matches = matches[3].match(re);
+  if (matches !== null) {
+    id = matches[2];
+    rest = matches[3].match(re) && matches[3];
+  }
+
+  return {
+    model: model,
+    id: id,
+    rest: rest
+  };
+}
+
+// TODO: write tests
+// TODO: impl. the mode when srcMustIncludeDst is false
+function makeRelativePath (srcPath, dstPath, srcMustIncludeDst) {
+  if (!srcMustIncludeDst) { throw new Error('TODO: not implemented'); }
+  
+  var src = path.normalize(srcPath).split(/(\/)/),
+      dst = path.normalize(dstPath).split(/(\/)/);
+
+  var l = Math.min(src.length, dst.length),
+      i = 0;
+
+  if (srcMustIncludeDst && l !== src.length) {
+    throw new Error('src must include dst');
+  }
+  
+  for (i = 0; i < l; ++i) {
+    if (src[i] !== dst[i] && src[i].length > 0) {
+      return srcPath;
+    }
+  }
+
+  return dst.slice(l).join('');
+}
+
+// TODO: write tests
+function makeRelativeUrl (src, dst) {
+  // TODO: consider query
+
+  var srcObj = url.parse(src, true),
+      dstObj = url.parse(dst, true);
+
+  delete srcObj.host;
+  delete dstObj.host;
+  
+  if (srcObj.protocol === dstObj.protocol) {
+    srcObj.protocol = null;
+    srcObj.slashes = false;
+  }
+
+  if (srcObj.auth !== dstObj.auth) {
+    return url.format(srcObj);
+  }
+
+  if (srcObj.protocol !== null || srcObj.auth !== null) {
+    return url.format(srcObj);
+  }
+
+  if (srcObj.hostname === dstObj.hostname && srcObj.port === dstObj.port) {
+    srcObj.hostname = null;
+    srcObj.port = null;
+  } else {
+    return url.format(srcObj);
+  }
+
+  if (srcObj.pathname === dstObj.pathname) {
+    srcObj.pathname = '';
+    return url.format(srcObj);
+  }
+
+  srcObj.pathname = makeRelativePath(srcObj.pathname, dstObj.pathname, true);
+
+  return url.format(srcObj);
+}
+
 function makeResourceMethod (name) {
-  return function (arg0, arg1) {
-    var Resource = this._models[name],
-        parent = (AbstractResource.isClassOf(this) ? this : null);
-    
+  return function (arg0, arg1, arg2) {
+    var Resource = this.$class.children[name],
+        parent = this;
+
     switch (typeof arg0) {
     case 'undefined':
       // resource()
     case 'boolean':
       // resource(true)
       return Resource.all(parent, !!arg0);
-      break;
     case 'string':
       // resource('id')
-      if (arg1) {
-        var res = Resource.byId(parent, arg0);
-        res.resolve();
-        return res.value;
-      } else {
-        return Resource.byId(parent, arg0);
-      }
-      break;
+      return Resource.byId(parent, arg0);
     case 'object':
       // resource({ key: value })
       return Resource.new(parent, arg0);
-      break;
     default:
       throw new TypeError('unknown type argument');
     }
   };
 }
 
-function parseDefinition (qlient, defs) {
+function parseDefinition (defs) {
   function parseModelName (name) {
     var fragments = name.split('$');
     switch (fragments.length) {
@@ -70,8 +153,7 @@ function parseDefinition (qlient, defs) {
   models = Object.keys(defs)
     .map(parseModelName)
     .reduce(function (obj, def) {
-      obj[def.name] = AbstractResource.def(qlient, def.name, def.idField,
-                                           defs[def.orig]);
+      obj[def.name] = AbstractResource.$extend(def.name, def.idField, defs[def.orig]);
       return obj;
     }, {});
 
@@ -89,44 +171,292 @@ function parseDefinition (qlient, defs) {
   };
 }
 
-var Qlient = Qlass.$extend({
-  def: function (modelDefs, endpoint) {
-    return Qlient.$extend({
-      modelDefs: modelDefs,
+function wrapPromise (value, promise) {
+  value.$promise = promise;
+  return value;
+}
+
+function dumpStack () {
+  var obj = {};
+  Error.captureStackTrace(obj, dumpStack);
+  console.log(obj.stack);
+}
+
+function hookLog (a) {
+  console.log(a);
+  return a;
+}
+
+var AbstractModel = Qlass.$extend({
+  $def: function (statics, dynamics, children) {
+    if (!!children)  {
+      // abstract
+      var def = parseDefinition(children || {});
+
+      statics.children = def.models;
+      dynamics = def.methods;      
+    }
+
+    return AbstractModel.$super.$def.call(this, statics, dynamics);
+  }
+}, {
+  ctor: function (parent) {
+    this._parent = parent || null;
+  },
+  request: function (method, pathname, query, headers, body) {
+    throw new TypeError('not implemented');
+  },
+  requestJSON: function (method, pathname, query, headers, bodyObject) {
+    if (isObject(bodyObject)) {
+      bodyObject = Object.keys(bodyObject).reduce(function (obj, key) {
+        if (key.indexOf('$$') !== 0) {
+          obj[key] = bodyObject[key];
+        }
+        return obj;
+      }, {});
+    }
+
+    var body = JSON.stringify(bodyObject);
+    return this.request(method, pathname, query, headers, body).then(function (xhr) {
+      return JSON.parse(xhr.response);
+    });
+  },
+  get parent () {
+    return this._parent;
+  },
+  get root () {
+    if (this.parent === null) {
+      // root is this
+      return this;
+    } else {
+      return this.parent.root;
+    }
+  },
+  get path () {
+    throw new TypeError('not implemented');
+  },
+  resolveRef: function (ref) {
+    var childRef = makeRelativeUrl(ref, this.path),
+        refObj = parseRef(childRef);
+    if (!this.$class.children.hasOwnProperty(refObj.model)) {
+      throw new SyntaxError('invalid reference: no such child model');
+    }
+    var Model = this.$class.children[refObj.model];
+    if (refObj.id === null) {
+      console.warn('really???');
+      return Model.all(this);
+    } else {
+      var model = Model.byId(this, refObj.id);
+      if (refObj.rest === null) {
+        return model;
+      } else {
+        return model.resolveRef(childRef);
+      }
+    }
+  }
+});
+
+var ResourceList = Qlass.$extend({
+}, {
+  ctor: function () {
+    this._list = [];
+    Object.defineProperties(this.value,  {
+      $: { enumerable: false, value: this },
+      $promise: { enumerable: false, value: null, writable: true }
+    });
+  },
+  get value() {
+    return this._list;
+  },
+  set: function (newList) {
+    // TODO: optimization
+
+    // remove all elements
+    var list = this.value;
+    while (list.length > 0) {
+      list.pop();
+    }
+
+    // add new elements
+    for (var i = 0; i < newList.length; ++i) {
+      list.push(newList[i]);
+    }
+
+    return this.value;
+  }
+});
+
+var AbstractResource = AbstractModel.$extend({
+  $def: function (name, idField, children) {
+    return AbstractResource.$super.$def.call(this, {
+      name: inflect.singularize(name),
+      _idField: idField,
+      _instances: {},
+      _list: ResourceList.new()
+    }, {}, children);
+  },
+  byId: function (parent, id) {
+    var Resource = this;
+    if (Resource._instances.hasOwnProperty(id)) {
+      return Resource._instances[id];
+    }
+    
+    var res = Resource.new(parent);
+    res._value[res.$class._idField] = id;
+    return res;
+  },
+  get pluralizedName() {
+    return inflect.pluralize(this.name);
+  },
+  all: function (parent, isDeep) {
+    var Resource = this,
+        res = Resource.new(parent);
+    
+    isDeep = isDeep || false; // TODO
+    
+    return wrapPromise(
+      Resource._list.value,
+      parent.requestJSON('GET', '/' + Resource.pluralizedName).then(function (list) {
+        return Resource._list.set(list.map(function (jsonObj) {
+          return Resource.new(parent, jsonObj).value;
+        }));
+      }).then(function (list) {
+        if (isDeep) {
+          return Qlient.Promise.all(list.map(function (value) {
+            return value.$.resolve();
+          })).then(function () {
+            return Resource._list.value;
+          });
+        } else {
+          return list;
+        }
+      }));
+  }
+}, {
+  ctor: function (parent, jsonObj) {
+    AbstractResource.$super.$proto.ctor.call(this, parent);
+
+    this._value = Object.create({
+      $: this,
+      $promise: Qlient.Promise.resolve()
+    });
+
+    if (isObject(jsonObj)) {
+      return this.set(jsonObj);
+    }
+
+    return this;
+  },
+  get value () {
+    return this._value;
+  },
+  get path () {
+    if (!this._isIdSet()) { throw new Error('id is not set'); }
+    return ['/', this.$class.pluralizedName, '/', this.id].join('');
+  },
+  get id () {
+    return this._value.hasOwnProperty(this.$class._idField) ?
+      (this.value[this.$class._idField] || '') : '';
+  },
+  resolve: function (query) {
+    if (!this._isIdSet()) { throw new Error('id is not set'); }
+    return wrapPromise(
+      this.value,
+      this.requestJSON('GET', '', query).then(this.set.bind(this)));
+  },
+  update: function (query) {
+    if (!this._isIdSet()) { throw new Error('id is not set'); }
+    return wrapPromise(
+      this.value,
+      this.requestJSON('PUT', '', query, {}, this.value).then(this.set.bind(this)));
+  },
+  remove: function (query) {
+    if (!this._isIdSet()) { throw new Error('id is not set'); }
+    return wrapPromise(
+      this.value,
+      this.requestJSON('DELETE', '', query).then(this.set.bind(this)));
+  },
+  create: function (query) {
+    if (this._isIdSet()) { throw new Error('id is set'); }
+    return wrapPromise(
+      this.value,
+      this.parent.requestJSON('POST', ['/', this.pluralizedName].join(''), query, {}, this.value)
+        .then(this.set.bind(this)));
+  },
+  assign: function (obj, key, path) {
+    var ref = pointer.path(this.value, path);
+    if (ref.chk()) {
+      obj[key] = ref.get();
+    }
+    return this.resolve().$promise.then(function (res) {
+      obj[key] = ref.get();
+      return res;
+    });
+  },
+  _isIdSet: function () {
+    return typeof this.id === 'string' && this.id.length > 0;
+  },
+  _setInstance: function () {
+    if (this._isIdSet) {
+      this.$class._instances[this.id] = this;
+    } else {
+      delete this.$class._instances[this.id];
+    }
+  },
+  set: function (jsonObj) {
+    if (jsonObj.hasOwnProperty('$ref')) {
+      return this.root.resolveRef(jsonObj.$ref);
+    } else {
+      var diff = patch.diff(this.value, jsonObj);
+      patch.patch(this.value, diff);
+
+      this._setInstance();
+
+      return this;
+    }
+  },
+  request: function (method, pathname, query, headers, body) {
+    return this.parent.request(method, this.path + pathname, query, headers, body);
+  }
+});
+
+var Qlient = AbstractModel.$extend({
+  $def: function (endpoint, children) {
+    return Qlient.$super.$def.call(this, {
       endpoint: endpoint
-    }, {});
+    }, {}, children);
   },
   Promise: global.Promise
 }, {
   ctor: function (user, password) {
+    Qlient.$super.$proto.ctor.call(this, null);
+
     this.auth = null;    
     if (user && password) {
       this.setBasicAuth(user, password);
     }
-
-    var def = parseDefinition(this, this.$class.modelDefs);
-    def.models.task = AbstractTask.def(this);
-    def.methods.task = makeResourceMethod('task');
-
-    this.Task = def.models.task;
-    this.$ = def.methods;
-    this.$._models = def.models;
+  },
+  get path () {
+    return this.$class.endpoint;
   },
   request: function (method, pathname, headers, body) {
     headers = headers || {};
-    var endPoint = url.resolve(this.$class.endpoint, pathname);
+    var endPoint = this.path + pathname;
 
     return new Qlient.Promise(function (resolve, reject) {
       var xhr = new XMLHttpRequest();
       xhr.onload = function () {
-        resolve(xhr);
+        if (xhr.status >= 400) {
+          reject(xhr);
+        } else {
+          resolve(xhr);        
+        }
       };
       xhr.onerror = function (err) {
         reject(err);
       };
       xhr.open(method, endPoint);
       if (this.auth !== null) {
-        //xhr.withCredentials = true;
         xhr.setRequestHeader('Authorization', this.auth);
       }
       Object.keys(headers).forEach(function (key) {
@@ -139,224 +469,5 @@ var Qlient = Qlass.$extend({
     this.auth = 'Basic ' + new Buffer(user + ':' + password).toString('base64');
   }
 });
-
-var ResourceList = Qlass.$extend({
-  
-}, {
-  _list: [],
-  ctor: function () {
-    Object.defineProperty(this.value, '$', {
-      enumerable: false
-    });
-    this.value.$ = this;
-  },
-  get value() {
-    return this._list;
-  },
-  sync: function (list) {
-    var activeIds = list.map(function (value) {
-      return value.$.id;
-    });
-
-    var i = 0;
-    for (i = this.value.length-1; i >= 0; --i) {
-      if (activeIds.indexOf(this.value[i].$.id) === -1) {
-        this.value[i].$.destroy();
-      }
-    }
-  }
-});
-
-var AbstractResource = Qlient.$extend({
-  def: function (qlient, name, idField, childDefs) {
-    var def = parseDefinition(qlient, childDefs);
-    return this.$extend({
-      name: name,
-      _qlient: qlient,
-      _idField: idField,
-      _instances: {},
-      _models: def.models
-    }, def.methods);
-  },
-  byId: function (parent, id) {
-    var Resource = this;
-    if (Resource._instances.hasOwnProperty(id)) {
-      return Resource._instances[id];
-    }
-    
-    var res = Resource.new(parent);
-    res._value[res.$class._idField] = id;
-    return res;
-  },
-  all: function (parent, isDeep) {
-    var Resource = this,
-        res = Resource.new(parent);
-
-    var tmpArray = [];
-
-    tmpArray.$promise = res._request('GET').then(function (list) {
-      var activeIds = list.map(function (value) {
-        return value[Resource._idField];
-      });
-      Object.keys(Resource._instances).forEach(function (instanceId) {
-        if (activeIds.indexOf(instanceId) < 0) {
-          Resource._instances[instanceId]._destroy();
-        }
-      });
-
-      return Qlient.Promise.all(list.map(function (value) {
-        var instance = Resource.new(parent);
-        instance._sync(value, true);
-        return isDeep ? instance.resolve() : instance;
-      }));
-    }).then(function (list) {
-      list.forEach(function (elem) { tmpArray.push(elem.value); });
-      return list;
-    });
-
-    return tmpArray;
-  }
-}, {
-  ctor: function (parent, obj) {
-    this._parent = parent || null;
-    this._value = Object.create({ $: this });
-
-    // TODO: dirty
-    this._models = this.$class._models;
-
-    if (typeof obj === 'object' && obj !== null) {
-      this._sync(obj);
-    }
-  },
-  get value () {
-    return this._value;
-  },
-  get id () {
-    return this._value.hasOwnProperty(this.$class._idField) ?
-      (this._value[this.$class._idField] || '') : '';
-  },
-  resolve: function () {
-    if (!this._isSetId()) { throw new Error('id is not set'); }
-    return this._request('GET').then(this._sync.bind(this));
-  },
-  update: function () {
-    if (!this._isSetId()) { throw new Error('id is not set'); }
-    return this._request('PUT', {}, {}, this.value).then(this._sync.bind(this));
-  },
-  remove: function () {
-    if (!this._isSetId()) { throw new Error('id is not set'); }
-    return this._request('DELETE').then(this._sync.bind(this));
-  },
-  create: function () {
-    if (this._isSetId()) { throw new Error('id is set'); }
-    return this._request('POST', {}, {}, this.value).then(this._sync.bind(this));
-  },
-  assign: function (obj, key, path) {
-    var ref = pointer.path(this.value, path);
-    if (ref.chk()) {
-      obj[key] = ref.get();
-    }
-    return this.resolve().then(function (res) {
-      obj[key] = ref.get();
-      return res;
-    });
-  },
-  _destroy: function () {
-    return this._sync({});
-  },
-  _isSetId: function () {
-    return typeof this.id === 'string' && this.id.length > 0;
-  },
-  _setInstance: function () {
-    if (this._isSetId) {
-      this.$class._instances[this.id] = this;
-    } else {
-      delete this.$class._instances[this.id];
-    }
-  },
-  _sync: function (newValue, shallow) {
-    var diff = patch.diff(this.value, newValue).filter(function (patch) {
-      return !shallow || patch.op !== 'remove';
-    });
-    patch.patch(this.value, diff);
-
-    this._setInstance();
-
-    return this;
-  },
-  _getPath: function () {
-    var path = (this._parent !== null) ? this._parent._getPath() : [],
-        name = inflect.pluralize(this.$class.name);
-
-    return path.concat([name, this.id]);
-  },
-  _request: function (method, query, headers, body) {
-    var urlPath, qlient;
-
-    urlPath = url.format({
-      pathname: path.join.apply(path, this._getPath()),
-      query: query || {}
-    });
-
-    qlient = this.$class._qlient;
-
-    if (typeof body === 'object' && body !== null) {
-      body = Object.keys(body).reduce(function (obj, key) {
-        if (key.indexOf('$$') !== 0) {
-          obj[key] = body[key];
-        }
-        return obj;
-      }, {});
-    }
-    
-    return qlient.request(method, urlPath, headers, JSON.stringify(body))
-      .then(function (xhr) {
-        // TODO: unsupported feature 'PATCH'
-        // this.$_etag = xhr.getResponseHeader('ETag');
-
-        return JSON.parse(xhr.response);
-      }.bind(this));
-  }
-});
-
-var AbstractTask = AbstractResource.$extend({
-  def: function (qlient, interval) {
-    return this.$extend({
-      name: 'task',
-      _qlient: qlient,
-      _idField: 'id',
-      _instances: {},
-      _cb: NOOP,
-      _timer: null,
-      _interval: interval
-    }, {});
-  },
-  queue: function (procedure, arguments, isSync) {
-    var Task = this,
-        task = Task.new();
-    return task._request('POST', { is_sync: isSync }, {}, {
-      procedure: procedure,
-      arguments: arguments
-    }).then(task._sync.bind(task));
-  },
-  sync: function (cb) {
-    this.unsync();
-
-    var Task = this;
-    Task._cb = cb || NOOP;
-    Task._timer = setInterval(function () {
-      Task.all().then(function (tasks) {
-        return Qlient.Promise.all(tasks.map(function (task) { return task.resolve(); }));
-      }).then(function (tasks) {
-        cb(tasks);
-      });
-    }, Task._interval);
-  },
-  unsync: function () {
-    var Task = this;
-    Task._cb = NOOP;
-    clearInterval(Task._timer);
-  }
-}, {});
 
 module.exports = Qlient;

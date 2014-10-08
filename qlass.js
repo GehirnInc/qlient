@@ -16,7 +16,7 @@ BaseQlass.$extend = function (/* statics, dynamics */) {
     value: Super
   });
 
-  var ret = Class.$def.apply(Class, Array.prototype.slice.call(arguments));
+  var ret = Super.$def.apply(Class, Array.prototype.slice.call(arguments));
 
   return (ret === undefined) ? Class : ret;
 };

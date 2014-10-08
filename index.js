@@ -272,7 +272,7 @@ var AbstractModel = Qlass.$extend({
     return Task.new(this.root, {
       procedure: procedure,
       arguments: args
-    }).create();
+    }).create({ is_sync: true });
   }
 });
 

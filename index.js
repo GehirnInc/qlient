@@ -102,75 +102,6 @@ function makeRelativeUrl (src, dst) {
   return url.format(srcObj);
 }
 
-function makeResourceMethod (name) {
-  return function (arg0, arg1, arg2) {
-    var Resource = this.$class.children[name],
-        parent = this;
-
-    switch (typeof arg0) {
-    case 'undefined':
-      // resource()
-    case 'boolean':
-      // resource(true)
-      return Resource.all(parent, !!arg0);
-    case 'string':
-      // resource('id')
-      return Resource.byId(parent, arg0);
-    case 'object':
-      // resource({ key: value })
-      return Resource.new(parent, arg0);
-    default:
-      throw new TypeError('unknown type argument');
-    }
-  };
-}
-
-function parseDefinition (defs) {
-  function parseModelName (name) {
-    var fragments = name.split('$');
-    switch (fragments.length) {
-    case 1:
-      return {
-        orig: name,
-        name: inflect.singularize(fragments[0].trim()),
-        idField: 'id'
-      };
-      break;
-    case 2:
-      return {
-        orig: name,
-        name: inflect.singularize(fragments[0].trim()),
-        idField: fragments[1].trim()
-      };
-      break;
-    default:
-      throw new SyntaxError('invalid model definition');
-    }
-  }
-
-  var methods, models;
-
-  models = Object.keys(defs)
-    .map(parseModelName)
-    .reduce(function (obj, def) {
-      obj[def.name] = AbstractResource.$extend(def.name, def.idField, defs[def.orig]);
-      return obj;
-    }, {});
-
-  methods = Object.keys(models).reduce(function (obj, name) {
-    var p = inflect.pluralize(name),
-        s = name;
-
-    obj[p] = obj[s] = makeResourceMethod(name);
-    return obj;
-  }, {});
-
-  return {
-    methods: methods,
-    models: models
-  };
-}
-
 function wrapPromise (value, promise) {
   value.$promise = promise;
   return value;
@@ -189,28 +120,39 @@ function hookLog (a) {
 
 var AbstractModel = Qlass.$extend({
   $def: function (statics, dynamics, children) {
-    if (!!children)  {
-      // abstract
-      var def = parseDefinition(children || {});
+    if (!isObject(statics)) {
+      statics = {};
+    }
+    if (!isObject(dynamics)) {
+      dynamics = {};
+    }
 
-      if (!isObject(statics)) {
-        statics = {};
-      }
-      statics.children = def.models;
-
-      if (!isObject(dynamics)) {
-        dynamics = {};
-      }
-      Object.keys(def.methods).forEach(function (key) {
-        dynamics[key] = def.methods[key];
-      });
+    if (Array.isArray(children)) {
+      statics.children = {};
+      children.map(function (child) {
+        child.name = inflect.singularize(child.name).toLowerCase();
+        child.idField = child.hasOwnProperty('idField') ? child.idField : 'id';
+        return child;
+      }).forEach(function (child) {
+        statics.children[child.name] = AbstractResource
+          .G(child.name, child.idField, child.children);
+      }, {});
     }
 
     return AbstractModel.$super.$def.call(this, statics, dynamics);
+  },
+  C: function (parent) {
+    return this.$extend({
+      parent: parent
+    }, {});
   }
 }, {
-  ctor: function (parent) {
-    this._parent = parent || null;
+  ctor: function () {
+    if (isObject(this.$class.children)) {
+      Object.keys(this.$class.children).forEach(function (key) {
+        this[key] = this.$class.children[key].C(this);
+      }.bind(this));
+    }
   },
   request: function (method, pathname, query, headers, body) {
     throw new TypeError('not implemented');
@@ -231,7 +173,7 @@ var AbstractModel = Qlass.$extend({
     });
   },
   get parent () {
-    return this._parent;
+    return this.$class.parent;
   },
   get root () {
     if (this.parent === null) {
@@ -250,12 +192,12 @@ var AbstractModel = Qlass.$extend({
     if (!this.$class.children.hasOwnProperty(refObj.model)) {
       throw new SyntaxError('invalid reference: no such child model');
     }
-    var Model = this.$class.children[refObj.model];
+    var Model = this[refObj.model];
     if (refObj.id === null) {
       console.warn('really???');
-      return Model.all(this);
+      return Model.all();
     } else {
-      var model = Model.byId(this, refObj.id);
+      var model = Model.byId(refObj.id);
       if (refObj.rest === null) {
         return model;
       } else {
@@ -264,7 +206,7 @@ var AbstractModel = Qlass.$extend({
     }
   },
   queue: function (childPath, procedure, args) {
-    var Task = this.$class.children.task;
+    var Task = this.root.$class.children.task;
     if (!isObject(args)) {
       args = {};
     }
@@ -307,43 +249,44 @@ var ResourceList = Qlass.$extend({
 });
 
 var AbstractResource = AbstractModel.$extend({
-  $def: function (name, idField, children) {
-    return AbstractResource.$super.$def.call(this, {
+  G: function (name, idField, children) {
+    return AbstractResource.$extend({
       name: inflect.singularize(name),
       _idField: idField,
       _instances: {},
       _list: ResourceList.new()
-    }, {}, children);
+    }, {}, children);      
   },
-  byId: function (parent, id) {
+  byId: function (id) {
     var Resource = this;
+
     if (Resource._instances.hasOwnProperty(id)) {
       return Resource._instances[id];
     }
-    
-    var res = Resource.new(parent);
-    res._value[res.$class._idField] = id;
+
+    var res = Resource.new();
+    res._value[Resource._idField] = id;
+
     return res;
   },
   get pluralizedName() {
     return inflect.pluralize(this.name);
   },
-  all: function (parent, isDeep) {
-    var Resource = this,
-        res = Resource.new(parent);
+  all: function (isDeep) {
+    var Resource = this;
     
     isDeep = isDeep || false; // TODO
-    
+
     return wrapPromise(
       Resource._list.value,
-      parent.requestJSON('GET', '/' + Resource.pluralizedName).then(function (list) {
+      this.parent.requestJSON('GET', '/' + Resource.pluralizedName).then(function (list) {
         return Resource._list.set(list.map(function (jsonObj) {
-          return Resource.new(parent, jsonObj).value;
+          return Resource.new(jsonObj).value;
         }));
       }).then(function (list) {
         if (isDeep) {
           return Qlient.Promise.all(list.map(function (value) {
-            return value.$.resolve();
+            return value.$.resolve().$promise;
           })).then(function () {
             return Resource._list.value;
           });
@@ -353,8 +296,12 @@ var AbstractResource = AbstractModel.$extend({
       }));
   }
 }, {
-  ctor: function (parent, jsonObj) {
-    AbstractResource.$super.$proto.ctor.call(this, parent);
+  ctor: function (jsonObj) {
+    AbstractResource.$super.$proto.ctor.call(this);
+
+    if (this.$class === AbstractResource) {
+      throw new TypeError('abstract class');
+    }
 
     this._value = Object.create({
       $: this,
@@ -417,7 +364,7 @@ var AbstractResource = AbstractModel.$extend({
     return typeof this.id === 'string' && this.id.length > 0;
   },
   _setInstance: function () {
-    if (this._isIdSet) {
+    if (this._isIdSet()) {
       this.$class._instances[this.id] = this;
     } else {
       delete this.$class._instances[this.id];
@@ -441,15 +388,16 @@ var AbstractResource = AbstractModel.$extend({
 });
 
 var Qlient = AbstractModel.$extend({
-  $def: function (endpoint, children) {
-    return Qlient.$super.$def.call(this, {
-      endpoint: endpoint
+  G: function (endpoint, children) {
+    return Qlient.$extend({
+      endpoint: endpoint,
+      parent: null
     }, {}, children);
   },
   Promise: global.Promise
 }, {
   ctor: function (user, password) {
-    Qlient.$super.$proto.ctor.call(this, null);
+    Qlient.$super.$proto.ctor.call(this);
 
     this.auth = null;    
     if (user && password) {

@@ -245,7 +245,7 @@ var AbstractModel = Qlass.$extend({
     throw new TypeError('not implemented');
   },
   resolveRef: function (ref) {
-    var childRef = makeRelativeUrl(ref, this.path),
+    var childRef = makeRelativeUrl(this.path, ref),
         refObj = parseRef(childRef);
     if (!this.$class.children.hasOwnProperty(refObj.model)) {
       throw new SyntaxError('invalid reference: no such child model');

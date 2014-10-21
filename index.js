@@ -42,7 +42,7 @@ function parseRef (ref) {
 // TODO: impl. the mode when srcMustIncludeDst is false
 function makeRelativePath (srcPath, dstPath, srcMustIncludeDst) {
   if (!srcMustIncludeDst) { throw new Error('TODO: not implemented'); }
-  
+
   var src = path.normalize(srcPath).split(/(\/)/),
       dst = path.normalize(dstPath).split(/(\/)/);
 
@@ -130,12 +130,16 @@ var AbstractModel = Qlass.$extend({
     if (Array.isArray(children)) {
       statics.children = {};
       children.map(function (child) {
-        child.name = inflect.singularize(child.name).toLowerCase();
+        child.type = child.type || 'resource';
+        //child.name = inflect.singularize(child.name).toLowerCase();
         child.idField = child.hasOwnProperty('idField') ? child.idField : 'id';
         return child;
       }).forEach(function (child) {
-        statics.children[child.name] = AbstractResource
-          .G(child.name, child.idField, child.children);
+        var T = {
+          resource: AbstractResource,
+          service: Service
+        }[child.type];
+        statics.children[child.name] = T.G(child.name, child.idField, child.children);
       }, {});
     }
 
@@ -145,6 +149,39 @@ var AbstractModel = Qlass.$extend({
     return this.$extend({
       parent: parent
     }, {});
+  },
+  get path () {
+    throw new TypeError('not implemented');
+  },
+  get abspath () {
+    throw new TypeError('not implemented');
+  },
+  // class method
+  get root () {
+    if (this.parent === null) {
+      // root is this
+      return this;
+    } else {
+      return this.parent.root;
+    }
+  },
+  get service () {
+    if (this.parent === this.root) {
+      return this;
+    } else {
+      return this.parent.service;
+    }
+  },
+  queue: function (procedure, args) {
+    var Task = this.service.task;
+    if (!isObject(args)) {
+      args = {};
+    }
+    args.self = this.abspath;
+    return Task.new({
+      procedure: procedure,
+      arguments: args
+    }).create({ is_sync: true });
   }
 }, {
   ctor: function () {
@@ -160,7 +197,7 @@ var AbstractModel = Qlass.$extend({
   requestJSON: function (method, pathname, query, headers, bodyObject) {
     if (isObject(bodyObject)) {
       bodyObject = Object.keys(bodyObject).reduce(function (obj, key) {
-        if (key.indexOf('$$') !== 0) {
+        if (key.indexOf('$') !== 0) {
           obj[key] = bodyObject[key];
         }
         return obj;
@@ -170,6 +207,8 @@ var AbstractModel = Qlass.$extend({
     var body = JSON.stringify(bodyObject);
     return this.request(method, pathname, query, headers, body).then(function (xhr) {
       return JSON.parse(xhr.response);
+    }).catch(function () {
+      return {};// TODO!!!!!!!!!!!!!!!
     });
   },
   get parent () {
@@ -183,13 +222,32 @@ var AbstractModel = Qlass.$extend({
       return this.parent.root;
     }
   },
+  get service () {
+    if (this.parent === this.root) {
+      return this;
+    } else {
+      return this.parent.service;
+    }
+  },
   get path () {
     throw new TypeError('not implemented');
   },
+  get abspath () {
+    throw new TypeError('not implemented');
+  },
   resolveRef: function (ref) {
+    if (this.root === this) {
+      var Q = Object.keys(this.$class.children).map(function (key) {
+        return this[key];
+      }.bind(this)).filter(function (Q) {
+        return ref.indexOf(Q.endpoint) === 0;
+      })[0];
+      return Q.new().resolveRef(ref);
+    }
     var childRef = makeRelativeUrl(this.path, ref),
         refObj = parseRef(childRef);
     if (!this.$class.children.hasOwnProperty(refObj.model)) {
+      debugger;
       throw new SyntaxError('invalid reference: no such child model');
     }
     var Model = this[refObj.model];
@@ -199,19 +257,21 @@ var AbstractModel = Qlass.$extend({
     } else {
       var model = Model.byId(refObj.id);
       if (refObj.rest === null) {
+        model.resolve();
         return model;
       } else {
         return model.resolveRef(childRef);
       }
     }
   },
-  queue: function (childPath, procedure, args) {
-    var Task = this.root.$class.children.task;
+  // instance method
+  queue: function (procedure, args) {
+    var Task = this.root.task;
     if (!isObject(args)) {
       args = {};
     }
-    args.self = this.path + childPath;
-    return Task.new(this.root, {
+    args.self = this.abspath;
+    return Task.new({
       procedure: procedure,
       arguments: args
     }).create({ is_sync: true });
@@ -294,6 +354,12 @@ var AbstractResource = AbstractModel.$extend({
           return list;
         }
       }));
+  },
+  get path () {
+    return ['/', this.pluralizedName].join('');
+  },
+  get abspath () {
+    return this.parent.path + this.path;
   }
 }, {
   ctor: function (jsonObj) {
@@ -318,8 +384,14 @@ var AbstractResource = AbstractModel.$extend({
     return this._value;
   },
   get path () {
-    if (!this._isIdSet()) { throw new Error('id is not set'); }
-    return ['/', this.$class.pluralizedName, '/', this.id].join('');
+    if (!this._isIdSet()) {
+      debugger;
+      throw new Error('id is not set');
+    }
+    return [this.$class.path, '/', this.id].join('');
+  },
+  get abspath () {
+    return this.parent.path + this.path;
   },
   get id () {
     return this._value.hasOwnProperty(this.$class._idField) ?
@@ -374,8 +446,31 @@ var AbstractResource = AbstractModel.$extend({
     if (jsonObj.hasOwnProperty('$ref')) {
       return this.root.resolveRef(jsonObj.$ref);
     } else {
-      var diff = patch.diff(this.value, jsonObj);
-      patch.patch(this.value, diff);
+      var that = this;
+      jsonObj = (function walk (jsonObj) {
+        switch (true) {
+        case Array.isArray(jsonObj):
+          return jsonObj.map(walk);
+        case isObject(jsonObj):
+          if (jsonObj.hasOwnProperty('$ref')) {
+            return that.root.resolveRef(jsonObj.$ref).value;
+          } else {
+            Object.keys(jsonObj).forEach(function (key) {
+              jsonObj[key] = walk(jsonObj[key]);
+            });
+            return jsonObj;
+          }
+        default:
+          return jsonObj;
+        }
+      })(jsonObj);
+
+      //var diff = patch.diff(this.value, jsonObj);
+      //patch.patch(this.value, diff);
+
+      Object.keys(jsonObj).forEach(function (key) {
+        this.value[key] = jsonObj[key];
+      }.bind(this));
 
       this._setInstance();
 
@@ -387,26 +482,34 @@ var AbstractResource = AbstractModel.$extend({
   }
 });
 
-var Qlient = AbstractModel.$extend({
-  G: function (endpoint, children) {
-    return Qlient.$extend({
+var Service = AbstractModel.$extend({
+  G: function (endpoint, _, children) {
+    return Service.$extend({
       endpoint: endpoint,
-      parent: null
+      instance: null
     }, {}, children);
   },
-  Promise: global.Promise
+  get path () {
+    return this.endpoint;
+  },
+  get abspath () {
+    return this.endpoint;
+  }
 }, {
-  ctor: function (user, password) {
-    Qlient.$super.$proto.ctor.call(this);
-
-    this.auth = null;    
-    if (user && password) {
-      this.setBasicAuth(user, password);
+  ctor: function () {
+    if (this.$class.instance !== null) {
+      return this.$class.instance;
     }
+    Service.$super.$proto.ctor.call(this);
+    this.$class.instance = this;
+    return this;
   },
   get path () {
     return this.$class.endpoint;
   },
+  get abspath () {
+    return this.$class.endpoint;
+  },  
   request: function (method, pathname, query, headers, body) {
     headers = headers || {};
     var urlObj = url.parse(this.path + pathname);
@@ -426,14 +529,32 @@ var Qlient = AbstractModel.$extend({
         reject(err);
       };
       xhr.open(method, endPoint);
-      if (this.auth !== null) {
-        xhr.setRequestHeader('Authorization', this.auth);
+      if (this.parent.auth !== null) {
+        xhr.setRequestHeader('Authorization', this.parent.auth);
       }
       Object.keys(headers).forEach(function (key) {
         xhr.setRequestHeader(key, headers[key]);
       });
       xhr.send(body);
     }.bind(this));
+  }
+});
+
+var Qlient = AbstractModel.$extend({
+  G: function (children) {
+    return Qlient.$extend({
+      parent: null
+    }, {}, children);
+  },
+  Promise: global.Promise
+}, {
+  ctor: function (user, password) {
+    Qlient.$super.$proto.ctor.call(this);
+
+    this.auth = null;    
+    if (user && password) {
+      this.setBasicAuth(user, password);
+    }
   },
   setBasicAuth: function (user, password) {
     this.auth = 'Basic ' + new Buffer(user + ':' + password).toString('base64');

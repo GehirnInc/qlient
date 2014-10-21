@@ -13,6 +13,13 @@ var Q = module.exports = Qlient;
 
 Q.Promise = global.Promise;
 
+Q.Flow = Flow;
+Q.Collection = Collection;
+Q.Type = Type;
+Q.Resource = Resource;
+Q.Service = Service;
+Q.Qlient = Qlient;
+
 // --------------------------------------------------------------------------------
 
 // TODO: write tests

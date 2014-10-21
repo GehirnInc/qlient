@@ -4,11 +4,26 @@ var util = require('util'),
     Q = require('./qlient'),
     Flow = require('./flow');
 
+function NOOP () {}
+
 function Collection (type, list) {
   Flow.call(this);
   this.type = type;
 }
 util.inherits(Collection, Flow);
+
+Collection.prototype.resolve = function (resolutions) {
+  return this.ready().then(function (list) {
+    return Q.Promise.all(list.map(function (res) {
+      return res.resolve(resolutions);
+    }));
+  });
+};
+
+Collection.prototype.$resolve = function (resolutions, cb) {
+  this.resolve(resolutions, cb || NOOP);
+  return this;
+};
 
 Collection.prototype.set = function (jsonArray) {
   var that = this;

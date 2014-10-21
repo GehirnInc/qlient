@@ -6,8 +6,25 @@ var util = require('util'),
 var Flow = require('./flow'),
     Q = require('./qlient');
 
+function NOOP () {}
+
 function isObject (obj) {
   return (typeof obj === 'object' && obj !== null);
+}
+
+function travasal (obj, tokens) {
+  if (tokens.length === 0) {
+    return obj;
+  }
+
+  var token = tokens[0];
+  if (obj instanceof Resource) {
+    return travasal(obj.value[token], tokens.slice(1));      
+  } else if (isObject(obj)) {
+    return travasal(obj[token], tokens.slice(1));  
+  } else {
+    throw new TypeError('premitive value `' + obj + '`(' + typeof obj + ') has no property: ' + tokens.toString());
+  }    
 }
 
 function Resource (type, obj, children) {
@@ -40,32 +57,65 @@ Object.defineProperties(Resource.prototype, {
 });
 
 Resource.prototype.create = function (query) {
-  this.type.request('POST', '', query, {}, this.value).then(this.set.bind(this));
+  return this.type.request('POST', '', query, {}, this.value).then(this.set.bind(this));
+};
 
+Resource.prototype.$create = function (query, cb) {
+  this.$create(query).then(cb || NOOP);
   return this;
 };
 
-Resource.prototype.$resolve = function (query) {
-  //console.log('resolve', this.type.name);
+Resource.prototype.resolve = function (resolutions) {
+  function resolve (res) {
+    if (res instanceof Resource) {
+      return res.fetch();
+    } else if (Array.isArray(res)) {
+      return Q.Promise.all(res.map(function (res) { return resolve(res, []); }));
+    }
+    return res;
+  }
+
+  return resolutions.map(pointer.decode).map(function (tokens) {
+    return function () {
+      return resolve(travasal({'': this}, tokens));
+    }.bind(this);
+  }.bind(this)).reduce(function (p, n) {
+    return p.then(n);
+  }, Q.Promise.resolve()).then(function () {
+    return this;
+  }.bind(this));
+};
+
+Resource.prototype.$resolve = function (resolutions, cb) {
+  this.resolve(resolutions).then(cb || NOOP);
+  return this;  
+};
+
+Resource.prototype.fetch = function (query) {
   return this.request('GET', null, query).then(this.set.bind(this));
 };
 
-Resource.prototype.resolve = function (query) {
-  this.$resolve(query);
-
+Resource.prototype.$fetch = function (query, cb) {
+  this.fetch(query).then(cb || NOOP);
   return this;
 };
 
 Resource.prototype.update = function (query) {
-  this.request('PUT', null, query, null, this.value).then(this.set.bind(this));
+  return this.request('PUT', null, query, null, this.value).then(this.set.bind(this));
+};
 
-  return this;
+Resource.prototype.$update = function (query, cb) {
+  this.update(query).then(cb || NOOP);
+  return this;  
 };
 
 Resource.prototype.remove = function (query) {
-  this.request('DELETE', null, query).then(this.set.bind(this));
+  return this.request('DELETE', null, query).then(this.set.bind(this));
+};
 
-  return this;
+Resource.prototype.$remove = function (query, cb) {
+  this.remove(query).then(cb || NOOP);
+  return this;  
 };
 
 Resource.prototype.request = function (method, pathname, query, headers, body) {
@@ -98,30 +148,6 @@ Resource.prototype.set = function (jsonObj) {
 Resource.prototype.toObject = function (resolutions) {
   resolutions = resolutions || [''];
 
-  function travasal (obj, tokens) {
-    if (tokens.length === 0) {
-      return obj;
-    }
-
-    var token = tokens[0];
-    if (obj instanceof Resource) {
-      return travasal(obj.value[token], tokens.slice(1));      
-    } else if (isObject(obj)) {
-      return travasal(obj[token], tokens.slice(1));  
-    } else {
-      throw new TypeError('premitive value `' + obj + '`(' + typeof obj + ') has no property: ' + tokens.toString());
-    }    
-  }
-
-  function resolve (res) {
-    if (res instanceof Resource) {
-      return res.$resolve();
-    } else if (Array.isArray(res)) {
-      return Q.Promise.all(res.map(function (res) { return resolve(res, []); }));
-    }
-    return res;
-  }
-
   function copy (res) {
     if (res instanceof Resource) {
       return Object.keys(res.value).map(function (key) {
@@ -138,19 +164,16 @@ Resource.prototype.toObject = function (resolutions) {
     }
   }
 
-  var rTokens = resolutions.map(pointer.decode);
-
-  return rTokens.map(function (tokens) {
-    return function () {
-      return resolve(travasal({'': this}, tokens));
-    }.bind(this);
-  }.bind(this)).reduce(function (p, n) {
-    return p.then(n);
-  }, Q.Promise.resolve()).then(function () {
-    return rTokens.reduce(function (o, tokens) {
+  return this.resolve(resolutions).then(function () {
+    return resolutions.map(pointer.decode).reduce(function (o, tokens) {
       return pointer.path(o, tokens).set(copy(travasal({'': this}, tokens)));
     }.bind(this), {});
   }.bind(this)).catch(function (err) {
     console.warn(err.stack);
   });
+};
+
+Resource.prototype.$toObject = function (resolutions, cb) {
+  this.toObject(resolutions).then(cb || NOOP);
+  return this;
 };

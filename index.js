@@ -115,7 +115,6 @@ Qlient.prototype.resolveReference = function (ref) {
     var Service = this.services[refObj.child];
     return Service.resolveReference(refObj.rest);
   } else {
-    console.log(ref, refObj);
     throw new TypeError('no such service: ' + refObj.child);
   }
 };

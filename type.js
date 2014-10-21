@@ -21,7 +21,6 @@ function Type (parent, name, idField, children) {
 
 Type.prototype._createObjectWithId = function (id) {
   var obj = {};
-  debugger;
   obj[this.idField] = id;
   return obj;
 };

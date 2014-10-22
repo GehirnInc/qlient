@@ -15,8 +15,24 @@ function Service (parent, name, version, children) {
     
     return { key: typeDefinition.name, value: Type };
   }.bind(this)).toObject();
+
+  this.defaultHeaders = {};
 }
 
 Service.prototype.request = function (method, pathname, query, headers, body) {
+  headers = headers || {};
+  Object.keys(this.defaultHeaders).forEach(function (key) {
+    if (!headers.hasOwnProperty(key)) {
+      headers[key] = this.defaultHeaders[key];
+    }
+  }.bind(this));
   return this.parent.request(method, this.path + pathname, query, headers, body);
+};
+
+Service.prototype.setBasicAuth = function (user, password) {
+  if (user === null) {
+    delete this.defaultHeaders['Authorization'];
+  } else {
+    this.defaultHeaders['Authorization'] = 'Basic ' + global.btoa(user + ':' + password);
+  }
 };

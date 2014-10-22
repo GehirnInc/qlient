@@ -1,6 +1,7 @@
 module.exports = Flow;
 
-var events = require('events'),
+var pointer = require('./pointer'),
+    events = require('events'),
     EventEmitter = events.EventEmitter;
 
 var Q = require('./qlient');
@@ -27,8 +28,15 @@ Flow.prototype._notify = function (value) {
   this.ee.emit('change', value);
 };
 
-Flow.prototype.subscribe = function (f) {
+Flow.prototype.subscribe = function (f, i) {
+  if (i && this._isReady) {
+    f(this.value);
+  }
   this.ee.on('change', f);
+};
+
+Flow.prototype.unsubscribe = function (f) {
+  this.ee.removeListener('change', f);
 };
 
 Flow.prototype.ready = function () {
@@ -39,4 +47,15 @@ Flow.prototype.ready = function () {
       this.ee.once('change', f);
     }
   }.bind(this));
+};
+
+Flow.prototype.prop = function (path) {
+  var f = new Flow();
+  this.subscribe(function (v) {
+    var p = pointer.path(v, path);
+    if (p.chk()) {
+      f.value = p.get();
+    }
+  }, true);
+  return f;
 };

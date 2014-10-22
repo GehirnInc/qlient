@@ -39,6 +39,10 @@ function Resource (type, obj, children) {
     return { key: typeDefinition.name, value: Type };
   }.bind(this)).toObject();
 
+  this.subscribe(function () {
+    this.type.resources[this.value[this.type.idField]] = this;
+  }.bind(this));
+
   this.set(obj);
 }
 util.inherits(Resource, Flow);
@@ -57,7 +61,7 @@ Object.defineProperties(Resource.prototype, {
 });
 
 Resource.prototype.create = function (query) {
-  return this.type.request('POST', '', query, {}, this.value).then(this.set.bind(this));
+  return this.type.request('POST', '', query, {}, this).then(this.set.bind(this));
 };
 
 Resource.prototype.$create = function (query, cb) {
@@ -66,6 +70,7 @@ Resource.prototype.$create = function (query, cb) {
 };
 
 Resource.prototype.resolve = function (resolutions) {
+  resolutions = resolutions || [''];
   function resolve (res) {
     if (res instanceof Resource) {
       return res.fetch();
@@ -101,7 +106,7 @@ Resource.prototype.$fetch = function (query, cb) {
 };
 
 Resource.prototype.update = function (query) {
-  return this.request('PUT', null, query, null, this.value).then(this.set.bind(this));
+  return this.request('PUT', null, query, null, this).then(this.set.bind(this));
 };
 
 Resource.prototype.$update = function (query, cb) {

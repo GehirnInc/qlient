@@ -94,12 +94,15 @@ function parseRef (baseurl, ref, n) {
   };
 }
 
-Array.prototype.toObject = function toObject () {
-  return this.reduce(function (obj, kv) {
-    obj[kv.key] = kv.value;
-    return obj;
-  }, {});  
-};
+Object.defineProperty(Array.prototype, 'toObject', {
+  value: function toObject () {
+    return this.reduce(function (obj, kv) {
+      obj[kv.key] = kv.value;
+      return obj;
+    }, {});  
+  },
+  enumerable: false
+});
 
 String.prototype.toUpperCamelCase = function () {
   return this.replace(/(\w)(\w*)/g, function(g0, g1, g2){
